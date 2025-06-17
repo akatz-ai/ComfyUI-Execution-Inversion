@@ -1,0 +1,13 @@
+[project]
+name = "comfyui-execution-inversion"
+description = "Custom nodes for for loops, while loops, lazy nodes and switches etc."
+version = "0.0.1"
+license = { file = "LICENSE.txt" }
+
+[project.urls]
+Repository = "https://github.com/akatz-ai/ComfyUI-Execution-Inversion"
+
+[tool.comfy]
+PublisherId = "akatz"
+DisplayName = "ComfyUI-Execution-Inversion"
+Icon = "🔁"
