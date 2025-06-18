@@ -151,6 +151,78 @@ class ExecutionBlockerNode(FlowNode):
         if block:
             return (ExecutionBlocker("Blocked Execution" if verbose else None),)
         return (input,)
+    
+    
+@VariantSupport()
+class ForLoopOpen(FlowNode):
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "remaining": ("INT", {"default": 1, "min": 0, "max": 100000, "step": 1}),
+            },
+            "optional": {
+                "initial_value%d" % i: ("*",) for i in range(1, NUM_FLOW_SOCKETS)
+            },
+            "hidden": {
+                "initial_value0": ("*",)
+            }
+        }
+
+    RETURN_TYPES = tuple(["FLOW_CONTROL", "INT",] + ["*"] * (NUM_FLOW_SOCKETS-1))
+    RETURN_NAMES = tuple(["flow_control", "remaining"] + ["value%d" % i for i in range(1, NUM_FLOW_SOCKETS)])
+    FUNCTION = "for_loop_open"
+
+    def for_loop_open(self, remaining, **kwargs):
+        graph = GraphBuilder()
+        if "initial_value0" in kwargs:
+            remaining = kwargs["initial_value0"]
+        while_open = graph.node("WhileLoopOpen", condition=remaining, initial_value0=remaining, **{("initial_value%d" % i): kwargs.get("initial_value%d" % i, None) for i in range(1, NUM_FLOW_SOCKETS)})
+        outputs = [kwargs.get("initial_value%d" % i, None) for i in range(1, NUM_FLOW_SOCKETS)]
+        return {
+            "result": tuple(["stub", remaining] + outputs),
+            "expand": graph.finalize(),
+        }
+
+@VariantSupport()
+class ForLoopClose(FlowNode):
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "flow_control": ("FLOW_CONTROL", {"rawLink": True}),
+            },
+            "optional": {
+                "initial_value%d" % i: ("*",{"rawLink": True}) for i in range(1, NUM_FLOW_SOCKETS)
+            },
+        }
+
+    RETURN_TYPES = tuple(["*"] * (NUM_FLOW_SOCKETS-1))
+    RETURN_NAMES = tuple(["value%d" % i for i in range(1, NUM_FLOW_SOCKETS)])
+    FUNCTION = "for_loop_close"
+
+    def for_loop_close(self, flow_control, **kwargs):
+        graph = GraphBuilder()
+        while_open = flow_control[0]
+        # TODO - Requires WAS-ns. Will definitely want to solve before merging
+        sub = graph.node("IntMathOperation", operation="subtract", a=[while_open,1], b=1)
+        cond = graph.node("IntConditions", a=sub.out(0), b=0, operation=">")
+        input_values = {("initial_value%d" % i): kwargs.get("initial_value%d" % i, None) for i in range(1, NUM_FLOW_SOCKETS)}
+        while_close = graph.node("WhileLoopClose",
+                flow_control=flow_control,
+                condition=cond.out(0),
+                initial_value0=sub.out(0),
+                **input_values)
+        return {
+            "result": tuple([while_close.out(i) for i in range(1, NUM_FLOW_SOCKETS)]),
+            "expand": graph.finalize(),
+        }
 
 # Configuration for node display names
 
@@ -158,6 +230,8 @@ FLOW_CONTROL_NODE_CLASS_MAPPINGS = {
     "WhileLoopOpen": WhileLoopOpen,
     "WhileLoopClose": WhileLoopClose,
     "ExecutionBlocker": ExecutionBlockerNode,
+    "ForLoopOpen": ForLoopOpen,
+    "ForLoopClose": ForLoopClose,
 }
 
 # Generate display names with configurable prefix
@@ -165,4 +239,6 @@ FLOW_CONTROL_NODE_DISPLAY_NAME_MAPPINGS = {
     "WhileLoopOpen": f"While Loop Open {NODE_POSTFIX}",
     "WhileLoopClose": f"While Loop Close {NODE_POSTFIX}",
     "ExecutionBlocker": f"Execution Blocker {NODE_POSTFIX}",
+    "ForLoopOpen": f"For Loop Open {NODE_POSTFIX}",
+    "ForLoopClose": f"For Loop Close {NODE_POSTFIX}",
 }
