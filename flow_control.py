@@ -1,9 +1,34 @@
 from comfy_execution.graph_utils import GraphBuilder, is_link
 from comfy_execution.graph import ExecutionBlocker
 from .tools import VariantSupport
-from .base_node import NODE_NAME, NODE_POSTFIX, FlowNode
+from .base_node import NODE_NAME, NODE_POSTFIX, FlowNode, BaseNode
 
 NUM_FLOW_SOCKETS = 5
+
+# Internal helper node for for loop counter management
+@VariantSupport()
+class _ForLoopCounter(BaseNode):
+    """Internal node for for loop counter management - not exposed to users"""
+    
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "current_value": ("INT", {"forceInput": True}),
+            }
+        }
+    
+    RETURN_TYPES = ("INT", "BOOLEAN")
+    RETURN_NAMES = ("decremented", "should_continue")
+    FUNCTION = "process_counter"
+    CATEGORY = f""
+    
+    def process_counter(self, current_value):
+        decremented = current_value - 1
+        should_continue = decremented > 0
+        return (decremented, should_continue)
+
+
 @VariantSupport()
 class WhileLoopOpen(FlowNode):
     def __init__(self):
@@ -31,6 +56,7 @@ class WhileLoopOpen(FlowNode):
         for i in range(NUM_FLOW_SOCKETS):
             values.append(kwargs.get("initial_value%d" % i, None))
         return tuple(["stub"] + values)
+
 
 @VariantSupport()
 class WhileLoopClose(FlowNode):
@@ -79,7 +105,6 @@ class WhileLoopClose(FlowNode):
                 contained[child_id] = True
                 self.collect_contained(child_id, upstream, contained)
 
-
     def while_loop_close(self, flow_control, condition, dynprompt=None, unique_id=None, **kwargs):
         if not condition:
             # We're done with the loop
@@ -126,6 +151,7 @@ class WhileLoopClose(FlowNode):
             "result": tuple(result),
             "expand": graph.finalize(),
         }
+
 
 @VariantSupport()
 class ExecutionBlockerNode(FlowNode):
@@ -187,6 +213,7 @@ class ForLoopOpen(FlowNode):
             "expand": graph.finalize(),
         }
 
+
 @VariantSupport()
 class ForLoopClose(FlowNode):
     def __init__(self):
@@ -210,35 +237,39 @@ class ForLoopClose(FlowNode):
     def for_loop_close(self, flow_control, **kwargs):
         graph = GraphBuilder()
         while_open = flow_control[0]
-        # TODO - Requires WAS-ns. Will definitely want to solve before merging
-        sub = graph.node("IntMathOperation", operation="subtract", a=[while_open,1], b=1)
-        cond = graph.node("IntConditions", a=sub.out(0), b=0, operation=">")
+        
+        # Use our internal counter node instead of external dependencies
+        counter = graph.node("_ForLoopCounter", current_value=[while_open, 1])
+        
         input_values = {("initial_value%d" % i): kwargs.get("initial_value%d" % i, None) for i in range(1, NUM_FLOW_SOCKETS)}
         while_close = graph.node("WhileLoopClose",
                 flow_control=flow_control,
-                condition=cond.out(0),
-                initial_value0=sub.out(0),
+                condition=counter.out(1),  # should_continue output
+                initial_value0=counter.out(0),  # decremented output
                 **input_values)
         return {
             "result": tuple([while_close.out(i) for i in range(1, NUM_FLOW_SOCKETS)]),
             "expand": graph.finalize(),
         }
 
-# Configuration for node display names
 
+# Configuration for node display names
 FLOW_CONTROL_NODE_CLASS_MAPPINGS = {
     "WhileLoopOpen": WhileLoopOpen,
     "WhileLoopClose": WhileLoopClose,
     "ExecutionBlocker": ExecutionBlockerNode,
     "ForLoopOpen": ForLoopOpen,
     "ForLoopClose": ForLoopClose,
+    "_ForLoopCounter": _ForLoopCounter,  # Internal node, prefixed with underscore
 }
 
 # Generate display names with configurable prefix
+# Note: _ForLoopCounter is not included in display names as it's internal
 FLOW_CONTROL_NODE_DISPLAY_NAME_MAPPINGS = {
     "WhileLoopOpen": f"While Loop Open {NODE_POSTFIX}",
     "WhileLoopClose": f"While Loop Close {NODE_POSTFIX}",
     "ExecutionBlocker": f"Execution Blocker {NODE_POSTFIX}",
     "ForLoopOpen": f"For Loop Open {NODE_POSTFIX}",
     "ForLoopClose": f"For Loop Close {NODE_POSTFIX}",
+    # Intentionally not including _ForLoopCounter in display mappings
 }

@@ -1,7 +1,9 @@
+from comfy_execution.graph_utils import GraphBuilder
 import comfy.samplers
 import torch
+import random
 from .tools import VariantSupport
-from .base_node import NODE_POSTFIX, ListNode, DebugNode
+from .base_node import NODE_POSTFIX, ListNode, LogicNode, FlowNode, DebugNode, UtilityNode
 
 VALID_SAMPLERS = comfy.samplers.KSampler.SAMPLERS
 VALID_SCHEDULERS = comfy.samplers.KSampler.SCHEDULERS
@@ -297,6 +299,45 @@ class GetIntFromList(ListNode):
     def get_int_from_list(self, list: list, index: int):
         return (list[index],)
 
+
+@VariantSupport()
+class IntegerListGeneratorNode(ListNode):
+    """
+    Generate a list of integer values based on starting integer and control mode.
+    """
+    
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "start_int": ("INT", {"default": 0, "min": 0, "max": 0xffffffff, "step": 1}),
+                "quantity": ("INT", {"default": 5, "min": 1, "max": 10000, "step": 1}),
+                "control_mode": (["increment", "random"],),
+            },
+        }
+    
+    RETURN_TYPES = ("INT",)
+    FUNCTION = "generate_integer_list"
+    
+    def generate_integer_list(self, start_int: int, quantity: int, control_mode: str):
+        integers = []
+        
+        if control_mode == "increment":
+            for i in range(quantity):
+                integers.append(start_int + i)
+        elif control_mode == "random":
+            # Use start_int as master seed for deterministic random generation
+            random.seed(start_int)
+            for i in range(quantity):
+                if i == 0:
+                    # First seed is always the start seed
+                    integers.append(start_int)
+                else:
+                    # Generate random seeds using the master seed
+                    integers.append(random.randint(0, 0xffffffff))
+        
+        return (integers,)
+
 # Configuration for node display names
 
 UTILITY_NODE_CLASS_MAPPINGS = {
@@ -311,7 +352,8 @@ UTILITY_NODE_CLASS_MAPPINGS = {
     "DebugPrint": DebugPrint,
     "MakeListNode": MakeListNode,
     "GetFloatFromList": GetFloatFromList,
-    "GetIntFromList": GetIntFromList
+    "GetIntFromList": GetIntFromList,
+    "IntegerListGeneratorNode": IntegerListGeneratorNode,
 }
 
 # Generate display names with configurable prefix
@@ -328,4 +370,5 @@ UTILITY_NODE_DISPLAY_NAME_MAPPINGS = {
     "MakeListNode": f"Make List {NODE_POSTFIX}",
     "GetFloatFromList": f"Get Float From List {NODE_POSTFIX}",
     "GetIntFromList": f"Get Int From List {NODE_POSTFIX}",
+    "IntegerListGeneratorNode": f"Integer List Generator {NODE_POSTFIX}",
 }
