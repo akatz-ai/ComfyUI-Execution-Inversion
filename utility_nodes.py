@@ -1,9 +1,7 @@
-from comfy_execution.graph_utils import GraphBuilder
 import comfy.samplers
 import torch
-import random
 from .tools import VariantSupport
-from .base_node import NODE_POSTFIX, ListNode, LogicNode, FlowNode, DebugNode, UtilityNode
+from .base_node import NODE_POSTFIX, ListNode, DebugNode
 
 VALID_SAMPLERS = comfy.samplers.KSampler.SAMPLERS
 VALID_SCHEDULERS = comfy.samplers.KSampler.SCHEDULERS
@@ -182,79 +180,6 @@ class AccumulationSetItemNode(ListNode):
         new_accum[index] = value
         return ({"accum": new_accum},)
 
-
-from .flow_control import NUM_FLOW_SOCKETS
-@VariantSupport()
-class ForLoopOpen(FlowNode):
-    def __init__(self):
-        pass
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "remaining": ("INT", {"default": 1, "min": 0, "max": 100000, "step": 1}),
-            },
-            "optional": {
-                "initial_value%d" % i: ("*",) for i in range(1, NUM_FLOW_SOCKETS)
-            },
-            "hidden": {
-                "initial_value0": ("*",)
-            }
-        }
-
-    RETURN_TYPES = tuple(["FLOW_CONTROL", "INT",] + ["*"] * (NUM_FLOW_SOCKETS-1))
-    RETURN_NAMES = tuple(["flow_control", "remaining"] + ["value%d" % i for i in range(1, NUM_FLOW_SOCKETS)])
-    FUNCTION = "for_loop_open"
-
-    def for_loop_open(self, remaining, **kwargs):
-        graph = GraphBuilder()
-        if "initial_value0" in kwargs:
-            remaining = kwargs["initial_value0"]
-        while_open = graph.node("WhileLoopOpen", condition=remaining, initial_value0=remaining, **{("initial_value%d" % i): kwargs.get("initial_value%d" % i, None) for i in range(1, NUM_FLOW_SOCKETS)})
-        outputs = [kwargs.get("initial_value%d" % i, None) for i in range(1, NUM_FLOW_SOCKETS)]
-        return {
-            "result": tuple(["stub", remaining] + outputs),
-            "expand": graph.finalize(),
-        }
-
-@VariantSupport()
-class ForLoopClose(FlowNode):
-    def __init__(self):
-        pass
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "flow_control": ("FLOW_CONTROL", {"rawLink": True}),
-            },
-            "optional": {
-                "initial_value%d" % i: ("*",{"rawLink": True}) for i in range(1, NUM_FLOW_SOCKETS)
-            },
-        }
-
-    RETURN_TYPES = tuple(["*"] * (NUM_FLOW_SOCKETS-1))
-    RETURN_NAMES = tuple(["value%d" % i for i in range(1, NUM_FLOW_SOCKETS)])
-    FUNCTION = "for_loop_close"
-
-    def for_loop_close(self, flow_control, **kwargs):
-        graph = GraphBuilder()
-        while_open = flow_control[0]
-        # TODO - Requires WAS-ns. Will definitely want to solve before merging
-        sub = graph.node("IntMathOperation", operation="subtract", a=[while_open,1], b=1)
-        cond = graph.node("IntConditions", a=sub.out(0), b=0, operation=">")
-        input_values = {("initial_value%d" % i): kwargs.get("initial_value%d" % i, None) for i in range(1, NUM_FLOW_SOCKETS)}
-        while_close = graph.node("WhileLoopClose",
-                flow_control=flow_control,
-                condition=cond.out(0),
-                initial_value0=sub.out(0),
-                **input_values)
-        return {
-            "result": tuple([while_close.out(i) for i in range(1, NUM_FLOW_SOCKETS)]),
-            "expand": graph.finalize(),
-        }
-
 @VariantSupport()
 class DebugPrint(DebugNode):
     def __init__(self):
@@ -372,45 +297,6 @@ class GetIntFromList(ListNode):
     def get_int_from_list(self, list: list, index: int):
         return (list[index],)
 
-
-@VariantSupport()
-class SeedListGeneratorNode(ListNode):
-    """
-    Generate a list of seed values based on starting seed and control mode.
-    """
-    
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "start_seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffff, "step": 1}),
-                "num_frames": ("INT", {"default": 5, "min": 1, "max": 10000, "step": 1}),
-                "control_mode": (["increment", "random"],),
-            },
-        }
-    
-    RETURN_TYPES = ("INT",)
-    FUNCTION = "generate_seed_list"
-    
-    def generate_seed_list(self, start_seed: int, num_frames: int, control_mode: str):
-        seeds = []
-        
-        if control_mode == "increment":
-            for i in range(num_frames):
-                seeds.append(start_seed + i)
-        elif control_mode == "random":
-            # Use start_seed as master seed for deterministic random generation
-            random.seed(start_seed)
-            for i in range(num_frames):
-                if i == 0:
-                    # First seed is always the start seed
-                    seeds.append(start_seed)
-                else:
-                    # Generate random seeds using the master seed
-                    seeds.append(random.randint(0, 0xffffffff))
-        
-        return (seeds,)
-
 # Configuration for node display names
 
 UTILITY_NODE_CLASS_MAPPINGS = {
@@ -422,13 +308,10 @@ UTILITY_NODE_CLASS_MAPPINGS = {
     "AccumulationGetLengthNode": AccumulationGetLengthNode,
     "AccumulationGetItemNode": AccumulationGetItemNode,
     "AccumulationSetItemNode": AccumulationSetItemNode,
-    "ForLoopOpen": ForLoopOpen,
-    "ForLoopClose": ForLoopClose,
     "DebugPrint": DebugPrint,
     "MakeListNode": MakeListNode,
     "GetFloatFromList": GetFloatFromList,
-    "GetIntFromList": GetIntFromList,
-    "SeedListGeneratorNode": SeedListGeneratorNode,
+    "GetIntFromList": GetIntFromList
 }
 
 # Generate display names with configurable prefix
@@ -441,11 +324,8 @@ UTILITY_NODE_DISPLAY_NAME_MAPPINGS = {
     "AccumulationGetLengthNode": f"Accumulation Get Length {NODE_POSTFIX}",
     "AccumulationGetItemNode": f"Accumulation Get Item {NODE_POSTFIX}",
     "AccumulationSetItemNode": f"Accumulation Set Item {NODE_POSTFIX}",
-    "ForLoopOpen": f"For Loop Open {NODE_POSTFIX}",
-    "ForLoopClose": f"For Loop Close {NODE_POSTFIX}",
     "DebugPrint": f"Debug Print {NODE_POSTFIX}",
     "MakeListNode": f"Make List {NODE_POSTFIX}",
     "GetFloatFromList": f"Get Float From List {NODE_POSTFIX}",
     "GetIntFromList": f"Get Int From List {NODE_POSTFIX}",
-    "SeedListGeneratorNode": f"Seed List Generator {NODE_POSTFIX}",
 }
